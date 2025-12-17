@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Extrator de Médias - SUAP</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .loader {
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #3498db;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8 max-w-4xl">
+        <div class="bg-white rounded-lg shadow-xl p-8">
+            <header class="text-center mb-8">
+                <h1 class="text-3xl font-bold text-gray-700">Extrator de Médias do SUAP</h1>
+                <p class="text-gray-500 mt-2">Selecione o tipo de curso e extraia os dados.</p>
+            </header>
+
+            <form id="consulta-form" class="space-y-6">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="username" class="block text-sm font-medium text-gray-600">Usuário SUAP</label>
+                        <input type="text" id="username" name="username" required class="mt-1 block w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm">
+                    </div>
+                    <div>
+                        <label for="password" class="block text-sm font-medium text-gray-600">Senha</label>
+                        <input type="password" id="password" name="password" required class="mt-1 block w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="class_code" class="block text-sm font-medium text-gray-600">Código da Turma</label>
+                        <input type="text" id="class_code" name="class_code" required class="mt-1 block w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm" placeholder="Ex: 87241">
+                    </div>
+                    <div>
+                        <label for="course_type" class="block text-sm font-medium text-gray-600">Tipo de Curso</label>
+                        <select id="course_type" name="course_type" class="mt-1 block w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-md shadow-sm">
+                            <option value="subsequente">Subsequente (N1, NAF, MFD/Conceito)</option>
+                            <option value="integrado">Integrado (U1, U2, U3, Média)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button type="submit" id="submit-btn" class="w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-md hover:bg-indigo-700 transition flex items-center justify-center space-x-2">
+                    <span>Consultar</span>
+                </button>
+            </form>
+        </div>
+
+        <div id="result-container" class="bg-white rounded-lg shadow-xl p-8 mt-8 hidden">
+            <div class="flex justify-between items-center mb-6">
+                <h2 id="progress-title" class="text-2xl font-bold text-gray-700">Progresso</h2>
+                <button id="export-btn" class="bg-green-600 text-white font-bold py-2 px-4 rounded-md hover:bg-green-700 hidden">
+                    Exportar para Excel
+                </button>
+            </div>
+            <div id="progress-message" class="text-gray-600 mb-4"></div>
+            <div id="error-message" class="bg-red-100 text-red-700 px-4 py-3 rounded-md hidden"></div>
+            <div id="student-progress-list" class="space-y-2 max-h-60 overflow-y-auto bg-gray-50 p-4 rounded-md"></div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('consulta-form');
+        const submitBtn = document.getElementById('submit-btn');
+        const resultContainer = document.getElementById('result-container');
+        const progressMessage = document.getElementById('progress-message');
+        const errorMessage = document.getElementById('error-message');
+        const studentProgressList = document.getElementById('student-progress-list');
+        const exportBtn = document.getElementById('export-btn');
+
+        let fullResultData = [];
+        let eventSource;
+
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            resultContainer.classList.remove('hidden');
+            progressMessage.textContent = 'Iniciando...';
+            submitBtn.disabled = true;
+            errorMessage.classList.add('hidden');
+            exportBtn.classList.add('hidden');
+            studentProgressList.innerHTML = '';
+            fullResultData = [];
+
+            const params = new URLSearchParams(new FormData(form));
+            eventSource = new EventSource(`/stream_grades?${params.toString()}`);
+
+            eventSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.status === 'progress') progressMessage.textContent = data.message;
+                else if (data.status === 'student_processing') {
+                    const p = document.createElement('p');
+                    p.className = 'text-sm text-gray-700 flex items-center';
+                    p.innerHTML = `<span class="loader mr-2"></span> Processando: <strong>${data.name}</strong>`;
+                    studentProgressList.appendChild(p);
+                    studentProgressList.scrollTop = studentProgressList.scrollHeight;
+                }
+                else if (data.status === 'finished') {
+                    fullResultData = data.payload;
+                    progressMessage.textContent = `Concluído! ${fullResultData.length} registros.`;
+                    if (fullResultData.length > 0) exportBtn.classList.remove('hidden');
+                    finalize();
+                } 
+                else if (data.status === 'error') {
+                    showError(data.message);
+                    finalize();
+                }
+            };
+
+            eventSource.onerror = () => { finalize(); };
+        });
+
+        function finalize() {
+            if (eventSource) eventSource.close();
+            submitBtn.disabled = false;
+            studentProgressList.querySelectorAll('.loader').forEach(el => el.remove());
+        }
+
+        function showError(message) {
+            errorMessage.textContent = `Erro: ${message}`;
+            errorMessage.classList.remove('hidden');
+        }
+        
+        exportBtn.addEventListener('click', () => {
+            if (fullResultData.length === 0) return;
+            
+            const worksheet = XLSX.utils.json_to_sheet(fullResultData);
+            const range = XLSX.utils.decode_range(worksheet['!ref']);
+            const headers = Object.keys(fullResultData[0]);
+            const linkColIndex = headers.indexOf('Link do Boletim');
+
+            if (linkColIndex !== -1) {
+                for (let rowNum = range.s.r + 1; rowNum <= range.e.r; rowNum++) {
+                    const cellAddress = XLSX.utils.encode_cell({c: linkColIndex, r: rowNum});
+                    const cell = worksheet[cellAddress];
+                    if (cell && cell.t === 's' && cell.v.startsWith('=HYPERLINK')) {
+                        cell.f = cell.v.substring(1); // Ativa como fórmula (remove o '=')
+                        cell.t = 'f';
+                        const match = cell.v.match(/,"([^"]+)"\)/);
+                        if (match) cell.v = match[1]; // Texto de exibição
+                    }
+                }
+            }
+
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, 'Boletins');
+            XLSX.writeFile(workbook, `boletins_${new Date().getTime()}.xlsx`);
+        });
+    </script>
+</body>
+</html>

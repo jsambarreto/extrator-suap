@@ -1,0 +1,15 @@
+Ficheiro para ignorar ficheiros e pastas desnecessários na criação da imagem Docker.
+Ambientes virtuais
+venv/
+.venv/
+
+Ficheiros de cache do Python
+pycache/
+*.pyc
+*.pyo
+*.pyd
+
+Ficheiros de configuração local e sensíveis
+.env
+*.xlsx
+*.html
